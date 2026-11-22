@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light" data-palette="teal">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>GKI Verifier</title>
+<script>
+(function(){
+  try {
+    var t = localStorage.getItem('gki-theme') || 'auto';
+    var d = t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+    document.documentElement.dataset.theme = d ? 'dark' : 'light';
+    var p = localStorage.getItem('gki-palette') || 'teal';
+    if (/^(teal|blue|violet|green)$/.test(p)) document.documentElement.dataset.palette = p;
+  } catch (e) {}
+})();
+</script>
+<style>
+:root {
+  --surface: #f7f9f9;
+  --surface-low: #eff2f2;
+  --surface-card: #e9eded;
+  --surface-high: #e3e7e7;
+  --on-surface: #171d1d;
+  --on-surface-var: #3f4948;
+  --outline: #6f7979;
+  --outline-var: #bec9c8;
+  --error: #ba1a1a;
+  --error-c: #ffdad6;
+  --on-error-c: #410002;
+  --ok: #146c2e;
+  --ok-c: #b7f0bf;
+  --on-ok-c: #00210a;
+  --state: rgba(23, 29, 29, 0.08);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --surface: #0f1414;
+  --surface-low: #171d1d;
+  --surface-card: #1b2121;
+  --surface-high: #252b2b;
+  --on-surface: #dee4e3;
+  --on-surface-var: #bec9c8;
+  --outline: #899392;
+  --outline-var: #3f4948;
+  --error: #ffb4ab;
+  --error-c: #93000a;
+  --on-error-c: #ffdad6;
+  --ok: #8bd99a;
+  --ok-c: #1d4d2b;
+  --on-ok-c: #b7f0bf;
+  --state: rgba(222, 228, 227, 0.08);
+  color-scheme: dark;
+}
+
+:root[data-palette="teal"] { --primary: #006a6a; --on-primary: #ffffff; --primary-c: #9cf1f0; --on-primary-c: #002020; --sec-c: #cce8e7; --on-sec-c: #051f1f; }
+:root[data-theme="dark"][data-palette="teal"] { --primary: #80d5d4; --on-primary: #003737; --primary-c: #004f4f; --on-primary-c: #9cf1f0; --sec-c: #324b4b; --on-sec-c: #cce8e7; }
+
+:root[data-palette="blue"] { --primary: #0b57d0; --on-primary: #ffffff; --primary-c: #d3e3fd; --on-primary-c: #041e49; --sec-c: #c2e7ff; --on-sec-c: #001d35; }
+:root[data-theme="dark"][data-palette="blue"] { --primary: #a8c7fa; --on-primary: #062e6f; --primary-c: #0842a0; --on-primary-c: #d3e3fd; --sec-c: #004a77; --on-sec-c: #c2e7ff; }
+
+:root[data-palette="violet"] { --primary: #6750a4; --on-primary: #ffffff; --primary-c: #eaddff; --on-primary-c: #21005d; --sec-c: #e8def8; --on-sec-c: #1d192b; }
+:root[data-theme="dark"][data-palette="violet"] { --primary: #d0bcff; --on-primary: #381e72; --primary-c: #4f378b; --on-primary-c: #eaddff; --sec-c: #4a4458; --on-sec-c: #e8def8; }
+
+:root[data-palette="green"] { --primary: #146c2e; --on-primary: #ffffff; --primary-c: #c4eed0; --on-primary-c: #072711; --sec-c: #d7e8d6; --on-sec-c: #111f13; }
+:root[data-theme="dark"][data-palette="green"] { --primary: #6dd58c; --on-primary: #0a3818; --primary-c: #0f5223; --on-primary-c: #c4eed0; --sec-c: #354b38; --on-sec-c: #d7e8d6; }
+
+* { box-sizing: border-box; margin: 0; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  font-family: Roboto, "Google Sans", system-ui, -apple-system, sans-serif;
+  font-size: 14px; line-height: 1.5;
+  background: var(--surface); color: var(--on-surface);
+  min-height: 100vh; padding-bottom: calc(48px + env(safe-area-inset-bottom));
+}
+code, .mono { font-family: ui-monospace, "Roboto Mono", SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+.muted { color: var(--on-surface-var); font-size: 12.5px; }
+
+.appbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  min-height: 60px; padding: 8px 16px;
+  background: var(--surface); border-bottom: 1px solid var(--outline-var);
+}
+.appbar-title { flex: 1; min-width: 160px; }
+.appbar-title h1 { font-size: 19px; font-weight: 500; line-height: 1.2; }
+.appbar-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.palette-dots { display: flex; gap: 6px; align-items: center; padding: 4px 8px; border-radius: 999px; background: var(--surface-card); }
+.dot {
+  width: 18px; height: 18px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; padding: 0;
+}
+.dot.active { border-color: var(--on-surface); transform: scale(1.1); }
+.dot[data-p="teal"] { background: #006a6a; }
+.dot[data-p="blue"] { background: #0b57d0; }
+.dot[data-p="violet"] { background: #6750a4; }
+.dot[data-p="green"] { background: #146c2e; }
+.theme-btn {
+  background: var(--surface-card); color: var(--on-surface); border: 1px solid var(--outline-var);
+  border-radius: 999px; padding: 6px 12px; font-size: 12.5px; font-weight: 500; cursor: pointer; font-family: inherit;
+}
+
+.linear { position: sticky; top: 60px; z-index: 9; height: 3px; background: var(--sec-c); overflow: hidden; opacity: 0; transition: opacity .15s; }
+.linear.active { opacity: 1; }
+.linear span { display: block; height: 100%; width: 38%; background: var(--primary); animation: slide 1.15s infinite ease-in-out; }
+@keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(360%); } }
+
+.container { max-width: 1240px; margin: 0 auto; padding: 14px 16px; }
+
+.tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+.tab-btn {
+  background: var(--surface-low); color: var(--on-surface-var); border: 1px solid var(--outline-var);
+  padding: 8px 16px; border-radius: 999px; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 500;
+}
+.tab-btn:hover { background: var(--state); }
+.tab-btn.active { background: var(--sec-c); color: var(--on-sec-c); border-color: transparent; }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.card { background: var(--surface-card); border-radius: 16px; padding: 16px; margin-bottom: 14px; }
+.grid .card { margin-bottom: 0; }
+.card h3 { font-size: 14px; font-weight: 500; color: var(--on-surface); margin-bottom: 10px; }
+
+.picker {
+  display: block; border: 1px dashed var(--outline); border-radius: 12px; padding: 12px;
+  background: var(--surface-low); cursor: pointer;
+}
+.picker input[type="file"] { width: 100%; font-size: 13px; color: var(--on-surface); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 100%;
+  min-height: 44px; padding: 10px 20px; border-radius: 999px; border: none;
+  background: var(--primary); color: var(--on-primary); font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.badge { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 8px; font-weight: 600; font-size: 12.5px; }
+.badge.ok { background: var(--ok-c); color: var(--on-ok-c); }
+.badge.err { background: var(--error-c); color: var(--on-error-c); }
+
+.stat-num { font-size: 28px; font-weight: 500; line-height: 1.2; margin: 2px 0; }
+.pill { display: inline-block; padding: 3px 10px; border-radius: 8px; background: var(--primary-c); color: var(--on-primary-c); font-size: 12px; margin: 2px 4px 2px 0; font-weight: 500; }
+
+.callout { padding: 12px 14px; border-radius: 12px; margin-bottom: 8px; font-size: 13px; background: var(--surface-low); border-left: 4px solid var(--primary); }
+.callout.err { background: var(--error-c); color: var(--on-error-c); border-left-color: var(--error); }
+
+.search-input {
+  width: 100%; padding: 9px 14px; border-radius: 999px; border: 1px solid var(--outline-var);
+  background: var(--surface-low); color: var(--on-surface); font-family: inherit; font-size: 13px; margin-bottom: 10px;
+}
+
+.table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: 12.5px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--outline-var); vertical-align: top; }
+th { color: var(--on-surface-var); font-weight: 500; white-space: nowrap; }
+details summary { cursor: pointer; color: var(--primary); font-weight: 500; font-size: 13.5px; }
+</style>
+</head>
+<body>
+<header class="appbar">
+  <div class="appbar-title">
+    <h1>GKI Verifier</h1>
+    <div class="muted">Android GKI 2.0 KMI/vABI &amp; Boot Auditor</div>
+  </div>
+  <div class="appbar-controls">
+    <div class="palette-dots" title="Material You accent palette">
+      <button type="button" class="dot" data-p="teal" aria-label="Teal" onclick="setPalette('teal')"></button>
+      <button type="button" class="dot" data-p="blue" aria-label="Blue" onclick="setPalette('blue')"></button>
+      <button type="button" class="dot" data-p="violet" aria-label="Violet" onclick="setPalette('violet')"></button>
+      <button type="button" class="dot" data-p="green" aria-label="Green" onclick="setPalette('green')"></button>
+    </div>
+    <button type="button" class="theme-btn" id="themeBtn" onclick="cycleTheme()">Theme: Auto</button>
+  </div>
+</header>
+<div class="linear" id="progressBar"><span></span></div>
+
+<main class="container">
+  <div class="tabs">
+    <button type="button" class="tab-btn active" onclick="switchTab('audit', this)">vABI / KMI Audit</button>
+    <button type="button" class="tab-btn" onclick="switchTab('inspect', this)">Inspect</button>
+    <button type="button" class="tab-btn" onclick="switchTab('ko', this)">Modules &amp; vendor_boot</button>
+    <button type="button" class="tab-btn" onclick="switchTab('tools', this)">Baseline &amp; Stub</button>
+  </div>
+
+  <section id="tab-audit" class="tab-panel active">
+    <form id="auditForm">
+      <div class="grid">
+        <div class="card">
+          <h3>Reference (Stock / Baseline)</h3>
+          <label class="picker"><input type="file" id="refFile" required></label>
+          <div class="muted" style="margin-top:6px;">boot.img, AK3.zip, Image.*, vmlinux, Module.symvers, or .kmi.json.gz</div>
+        </div>
+        <div class="card">
+          <h3>Candidate (Modified Kernel)</h3>
+          <label class="picker"><input type="file" id="candFile" required></label>
+          <div class="muted" style="margin-top:6px;">new boot.img, patched .img, AK3.zip, Image.*, vmlinux, or Module.symvers</div>
+        </div>
+        <div class="card">
+          <h3>Vendor .ko or vendor_boot.img (Optional)</h3>
+          <label class="picker"><input type="file" id="auditKoFiles" multiple></label>
+          <div class="muted" style="margin-top:6px;">Select .ko/.ko.zst/.ko.xz modules or vendor_boot.img</div>
+        </div>
+        <div class="card">
+          <h3>KMI Symbol List (Optional)</h3>
+          <label class="picker"><input type="file" id="auditSymList"></label>
+          <div class="muted" style="margin-top:6px;">Optional abi_gki_aarch64 file to tag official KMI breaks</div>
+        </div>
+      </div>
+      <button type="submit" class="btn" id="auditBtn">Run vABI &amp; Boot Audit</button>
+    </form>
+    <div id="auditResults" hidden style="margin-top:16px;"></div>
+  </section>
+
+  <section id="tab-inspect" class="tab-panel">
+    <form id="inspectForm">
+      <div class="card">
+        <h3>Inspect Single Artifact</h3>
+        <label class="picker"><input type="file" id="inspectFile" required></label>
+        <div class="muted" style="margin:6px 0 12px 0;">Supports boot.img (v0-v4), vendor_boot.img (v3-v4), AK3.zip, Image.*, vmlinux, Module.symvers, or .kmi.json.gz</div>
+        <button type="submit" class="btn" id="inspectBtn">Inspect Artifact</button>
+      </div>
+    </form>
+    <div id="inspectResults" hidden></div>
+  </section>
+
+  <section id="tab-ko" class="tab-panel">
+    <form id="koForm">
+      <div class="grid">
+        <div class="card">
+          <h3>Target Kernel / Baseline</h3>
+          <label class="picker"><input type="file" id="koKernelFile" required></label>
+          <div class="muted" style="margin-top:6px;">boot.img, Image.*, vmlinux, Module.symvers, or .kmi.json.gz</div>
+        </div>
+        <div class="card">
+          <h3>Vendor .ko Files or vendor_boot.img</h3>
+          <label class="picker"><input type="file" id="koModFiles" multiple required></label>
+          <div class="muted" style="margin-top:6px;">Automatically extracts early-boot .ko modules from vendor_boot.img</div>
+        </div>
+        <div class="card">
+          <h3>Reference Kernel (Optional)</h3>
+          <label class="picker"><input type="file" id="koRefFile"></label>
+          <div class="muted" style="margin-top:6px;">Distinguishes removed kernel exports from external .ko dependencies</div>
+        </div>
+      </div>
+      <button type="submit" class="btn" id="koBtn">Verify Vendor Modules</button>
+    </form>
+    <div id="koResults" hidden style="margin-top:16px;"></div>
+  </section>
+
+  <section id="tab-tools" class="tab-panel">
+    <div class="grid">
+      <div class="card">
+        <h3>Export Compact KMI Baseline (.kmi.json.gz)</h3>
+        <form id="baseForm">
+          <label class="picker"><input type="file" id="baseFile" required></label>
+          <div class="muted" style="margin:6px 0 12px 0;">Serializes symbols, CRCs, AVB metadata, and IKCONFIG into a ~150 KB CI baseline.</div>
+          <button type="submit" class="btn" id="baseBtn">Generate &amp; Download Baseline</button>
+        </form>
+        <div id="baseMsg" class="muted" style="margin-top:10px;"></div>
+      </div>
+      <div class="card">
+        <h3>Generate OEM Boot Stub (.tzst)</h3>
+        <form id="stubForm">
+          <label class="picker"><input type="file" id="stubFile" required></label>
+          <div class="muted" style="margin:6px 0 12px 0;">Zeroes the kernel payload inside stock boot.img while preserving header, ramdisk, and AVB VBMETA.</div>
+          <button type="submit" class="btn" id="stubBtn">Generate &amp; Download .tzst Stub</button>
+        </form>
+        <div id="stubMsg" class="muted" style="margin-top:10px;"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const THEME_MODES = ['auto', 'light', 'dark'];
+
+function applyTheme(mode) {
+  const dark = mode === 'dark' || (mode === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  document.getElementById('themeBtn').textContent = 'Theme: ' + mode.charAt(0).toUpperCase() + mode.slice(1);
+}
+
+function cycleTheme() {
+  let cur = 'auto';
+  try { cur = localStorage.getItem('gki-theme') || 'auto'; } catch (e) {}
+  const next = THEME_MODES[(THEME_MODES.indexOf(cur) + 1) % THEME_MODES.length];
+  try { localStorage.setItem('gki-theme', next); } catch (e) {}
+  applyTheme(next);
+}
+
+function setPalette(p) {
+  document.documentElement.dataset.palette = p;
+  try { localStorage.setItem('gki-palette', p); } catch (e) {}
+  document.querySelectorAll('.dot').forEach(d => d.classList.toggle('active', d.dataset.p === p));
+}
+
+(function initControls() {
+  let t = 'auto', p = 'teal';
+  try { t = localStorage.getItem('gki-theme') || 'auto'; p = localStorage.getItem('gki-palette') || 'teal'; } catch (e) {}
+  applyTheme(t);
+  setPalette(p);
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    try { if ((localStorage.getItem('gki-theme') || 'auto') === 'auto') applyTheme('auto'); } catch (e) {}
+  });
+})();
+
+function setLoading(on) { document.getElementById('progressBar').classList.toggle('active', on); }
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtMiB(b) { return b ? (b / 1048576).toFixed(2) + ' MiB' : 'N/A'; }
+
+function switchTab(id, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+  btn.classList.add('active');
+}
+
+function filterTable(tbodyId, q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('#' + tbodyId + ' tr.filterable').forEach(r => {
+    r.style.display = r.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function renderKoTable(mods) {
+  if (!mods || !mods.length) return '';
+  const rows = mods.map(m => {
+    const st = m.compatible ? '<span class="badge ok">PASS</span>' : `<span class="badge err">FAIL (${m.failures.length})</span>`;
+    const fails = m.failures.slice(0, 15).map(f =>
+      `<div><code>[${esc(f.reason)}] ${esc(f.symbol)}</code>: exp <code>${esc(f.expected_crc)}</code>, got <code>${esc(f.actual_crc)}</code></div>`
+    ).join('');
+    return `<tr class="filterable">
+      <td><code>${esc(m.module_name)}</code></td>
+      <td>${st}</td>
+      <td>${m.total_imports}</td>
+      <td>${m.sibling_resolved}</td>
+      <td>${m.external_deps_count}</td>
+      <td>${fails || '<span class="muted">OK</span>'}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="card">
+    <h3>Vendor .ko Verification (${mods.length} modules)</h3>
+    <input type="text" class="search-input" placeholder="Filter modules or symbol errors..." oninput="filterTable('koVerTbody', this.value)">
+    <div class="table-wrap"><table>
+      <thead><tr><th>Module</th><th>Status</th><th>Imports</th><th>Sibling .ko</th><th>Ext Deps</th><th>Failures</th></tr></thead>
+      <tbody id="koVerTbody">${rows}</tbody>
+    </table></div>
+  </div>`;
+}
+
+document.getElementById('auditForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('auditBtn');
+  const out = document.getElementById('auditResults');
+  btn.disabled = true; setLoading(true); out.hidden = true;
+
+  const fd = new FormData();
+  fd.append('reference', document.getElementById('refFile').files[0]);
+  fd.append('candidate', document.getElementById('candFile').files[0]);
+  for (const f of document.getElementById('auditKoFiles').files) fd.append('modules', f);
+  const sl = document.getElementById('auditSymList').files[0];
+  if (sl) fd.append('symbol_list', sl);
+
+  try {
+    const r = await fetch('/api/compare', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Audit failed');
+    renderAudit(d);
+  } catch (err) {
+    out.hidden = false;
+    out.innerHTML = `<div class="card"><span class="badge err">ERROR</span> <p style="margin-top:8px;">${esc(err.message)}</p></div>`;
+  } finally {
+    btn.disabled = false; setLoading(false);
+  }
+});
+
+function renderAudit(d) {
+  const out = document.getElementById('auditResults');
+  out.hidden = false;
+  const vCls = d.is_safe ? 'ok' : 'err';
+  const vTxt = d.is_safe ? 'KMI / vABI SAFE TO FLASH' : 'vABI / BOOT STRUCTURE MISMATCH - DO NOT FLASH';
+
+  let analysisHtml = '';
+  if (d.structural_issues.length || d.breakage_analysis.has_breakage) {
+    let items = d.structural_issues.map(x =>
+      `<div class="callout err"><strong>[${esc(x.severity)}] ${esc(x.title)}</strong><div style="margin-top:4px;">${esc(x.details)}</div></div>`
+    ).join('');
+    const brk = d.breakage_analysis;
+    if (brk.has_breakage) {
+      const pills = brk.dominant_prefixes.map(p => `<span class="pill">${esc(p.prefix)}* (${p.count})</span>`).join('');
+      items += `<div class="callout"><strong>Blast Radius: ${esc(brk.blast_radius)} (${brk.affected_zones_count} subsystem zones)</strong><div style="margin-top:6px;">${pills}</div></div>`;
+      items += brk.sentinel_findings.map(s =>
+        `<div class="callout err"><strong>[SENTINEL] ${esc(s.target)}</strong><div style="margin-top:4px;">${esc(s.details)}</div></div>`
+      ).join('');
+    }
+    analysisHtml = `<div class="card"><h3>Breakage &amp; Structural Analysis</h3>${items}</div>`;
+  }
+
+  const zonesRows = Object.entries(d.zone_breakdown)
+    .sort((a, b) => (b[1].crc_changed + b[1].missing) - (a[1].crc_changed + a[1].missing))
+    .map(([z, st]) => `<tr><td><strong>${esc(z)}</strong></td><td style="color:${st.crc_changed?'var(--error)':'inherit'}">${st.crc_changed}</td><td style="color:${st.missing?'var(--error)':'inherit'}">${st.missing}</td><td style="color:${st.added?'var(--primary)':'inherit'}">${st.added}</td></tr>`).join('')
+    || '<tr><td colspan="4">0 differences across all kernel zones.</td></tr>';
+
+  const b1 = d.reference.boot_info?.avb_footer;
+  const b2 = d.candidate.boot_info?.avb_footer;
+  const kcAdd = Object.entries(d.kconfig_diff.added_or_changed || {}).map(([k, v]) => `<tr><td><code>${esc(k)}</code></td><td style="color:var(--primary)"><code>${esc(v)}</code></td></tr>`).join('');
+  const kcRem = Object.entries(d.kconfig_diff.removed || {}).map(([k, v]) => `<tr><td><code>${esc(k)}</code></td><td style="color:var(--error)"><code>unset (was ${esc(v)})</code></td></tr>`).join('');
+
+  const kmiTag = x => x.in_kmi_list ? ' <span class="pill">KMI</span>' : '';
+  const diffRows = d.crc_diffs.map(x =>
+    `<tr class="filterable"><td><code>${esc(x.symbol)}</code>${kmiTag(x)}</td><td>${esc(x.zone)}</td><td>${esc(x.type)}</td><td><code>${esc(x.ref_crc)}</code></td><td style="color:var(--error)"><code>${esc(x.cand_crc)}</code></td></tr>`
+  ).join('');
+  const missRows = d.missing_list.map(x =>
+    `<tr class="filterable"><td><code>${esc(x.symbol)}</code>${kmiTag(x)}</td><td>${esc(x.zone)}</td><td>${esc(x.type)}</td><td style="color:var(--error)"><code>${esc(x.ref_crc)}</code></td></tr>`
+  ).join('');
+  const addRows = d.added_list.map(x =>
+    `<tr class="filterable"><td><code>${esc(x.symbol)}</code></td><td>${esc(x.zone)}</td><td>${esc(x.type)}</td><td style="color:var(--primary)"><code>${esc(x.cand_crc)}</code></td></tr>`
+  ).join('');
+
+  const kmiNote = d.summary.kmi_listed_breakages !== null && d.summary.kmi_listed_breakages !== undefined
+    ? ` <span class="pill">KMI list breaks: ${d.summary.kmi_listed_breakages}</span>` : '';
+
+  out.innerHTML = `
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+      <div><span class="badge ${vCls}">${vTxt}</span>${kmiNote}</div>
+      <span class="muted">Reference: <b>${esc(d.reference.name)}</b> vs Candidate: <b>${esc(d.candidate.name)}</b></span>
+    </div>
+
+    <div class="grid">
+      <div class="card"><h3>Identical CRCs</h3><div class="stat-num" style="color:var(--ok)">${d.summary.identical_symbols}</div><div class="muted">of ${d.reference.total_symbols} symbols</div></div>
+      <div class="card"><h3>CRC Mismatches</h3><div class="stat-num" style="color:${d.summary.crc_mismatches?'var(--error)':'var(--ok)'}">${d.summary.crc_mismatches}</div><div class="muted">broken KMI symbols</div></div>
+      <div class="card"><h3>Missing Symbols</h3><div class="stat-num" style="color:${d.summary.missing_symbols?'var(--error)':'var(--ok)'}">${d.summary.missing_symbols}</div><div class="muted">removed exports</div></div>
+      <div class="card"><h3>Added Symbols</h3><div class="stat-num" style="color:var(--primary)">${d.summary.added_symbols}</div><div class="muted">new exports</div></div>
+    </div>
+
+    ${analysisHtml}
+
+    <div class="grid">
+      <div class="card">
+        <h3>Affected Kernel Zones</h3>
+        <div class="table-wrap"><table><thead><tr><th>Subsystem Zone</th><th>CRC Changed</th><th>Missing</th><th>Added</th></tr></thead><tbody>${zonesRows}</tbody></table></div>
+      </div>
+      <div class="card">
+        <h3>Boot Image &amp; AVB VBMETA</h3>
+        <div class="table-wrap"><table>
+          <thead><tr><th>Property</th><th>Reference</th><th>Candidate</th></tr></thead>
+          <tbody>
+            <tr><td>Container</td><td>${esc(d.reference.container_type)} (${esc(d.reference.kernel_format)})</td><td>${esc(d.candidate.container_type)} (${esc(d.candidate.kernel_format)})</td></tr>
+            <tr><td>Kernel Size</td><td>${fmtMiB(d.reference.decompressed_size)}</td><td>${fmtMiB(d.candidate.decompressed_size)}</td></tr>
+            <tr><td>VBMETA Size</td><td>${b1 ? b1.vbmeta_size + ' B' : 'N/A'}</td><td>${b2 ? b2.vbmeta_size + ' B' : 'N/A'}</td></tr>
+            <tr><td>Banner</td><td><code>${esc(d.reference.linux_banner)}</code></td><td><code>${esc(d.candidate.linux_banner)}</code></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </div>
+
+    ${renderKoTable(d.module_verification)}
+
+    <div class="card">
+      <h3>Embedded Kconfig (/proc/config.gz) Diff</h3>
+      <div class="table-wrap"><table><thead><tr><th>Kconfig Option</th><th>State in Candidate</th></tr></thead>
+      <tbody>${kcAdd}${kcRem || (!kcAdd ? '<tr><td colspan="2">No Kconfig differences detected.</td></tr>' : '')}</tbody></table></div>
+    </div>
+
+    ${d.crc_diffs.length ? `<div class="card">
+      <h3>Symbol CRC Mismatches (${d.summary.crc_mismatches})</h3>
+      <input type="text" class="search-input" placeholder="Filter broken symbols..." oninput="filterTable('diffTbody', this.value)">
+      <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Zone</th><th>Type</th><th>Ref CRC</th><th>Cand CRC</th></tr></thead><tbody id="diffTbody">${diffRows}</tbody></table></div>
+    </div>` : ''}
+
+    ${d.missing_list.length ? `<div class="card">
+      <h3>Missing Symbols (${d.summary.missing_symbols})</h3>
+      <input type="text" class="search-input" placeholder="Filter missing symbols..." oninput="filterTable('missTbody', this.value)">
+      <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Zone</th><th>Type</th><th>Ref CRC</th></tr></thead><tbody id="missTbody">${missRows}</tbody></table></div>
+    </div>` : ''}
+
+    ${d.added_list.length ? `<div class="card">
+      <details><summary>Added Symbols (${d.summary.added_symbols})</summary>
+        <input type="text" class="search-input" style="margin-top:8px;" placeholder="Filter added symbols..." oninput="filterTable('addTbody', this.value)">
+        <div class="table-wrap"><table><thead><tr><th>Symbol</th><th>Zone</th><th>Type</th><th>Cand CRC</th></tr></thead><tbody id="addTbody">${addRows}</tbody></table></div>
+      </details>
+    </div>` : ''}
+  `;
+}
+
+document.getElementById('inspectForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('inspectBtn');
+  const out = document.getElementById('inspectResults');
+  btn.disabled = true; setLoading(true);
+  const fd = new FormData();
+  fd.append('artifact', document.getElementById('inspectFile').files[0]);
+  try {
+    const r = await fetch('/api/inspect', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Inspect failed');
+    const ikEntries = Object.entries(d.ikconfig || {}).sort();
+    const ikRows = ikEntries.map(([k, v]) => `<tr class="filterable"><td><code>${esc(k)}</code></td><td><code>${esc(v)}</code></td></tr>`).join('');
+    let extra = '';
+    if (d.boot_info) {
+      const avb = d.boot_info.avb_footer;
+      extra += `<div class="card"><h3>Android Boot Header</h3><div class="table-wrap"><table><tbody>
+        <tr><td>Header Version</td><td>v${d.boot_info.header_version}</td></tr>
+        <tr><td>Page Size</td><td>${d.boot_info.page_size} B</td></tr>
+        <tr><td>Cmdline</td><td><code>${esc(d.boot_info.cmdline || 'none')}</code></td></tr>
+        <tr><td>Kernel / Ramdisk</td><td>${fmtMiB(d.boot_info.kernel_size)} / ${d.boot_info.ramdisk_size} B</td></tr>
+        <tr><td>AVB VBMETA</td><td>${avb ? avb.vbmeta_size + ' B @ ' + avb.vbmeta_offset : 'None'}</td></tr>
+      </tbody></table></div></div>`;
+    }
+    if (d.vendor_boot_info) {
+      const vb = d.vendor_boot_info;
+      const frags = vb.ramdisk_fragments.map(f => `<tr><td>${f.index}</td><td>${esc(f.name)}</td><td>${esc(f.type)}</td><td>${f.size} B</td></tr>`).join('');
+      extra += `<div class="card"><h3>vendor_boot v${vb.header_version} (${vb.extracted_ko_count} .ko modules, ${vb.dtb_count} DTB)</h3>
+        <div class="table-wrap"><table><thead><tr><th>#</th><th>Fragment</th><th>Type</th><th>Size</th></tr></thead><tbody>${frags}</tbody></table></div>
+      </div>`;
+    }
+    out.hidden = false;
+    out.innerHTML = `<div class="card"><h3>Overview: ${esc(d.source_name)}</h3><div class="table-wrap"><table><tbody>
+      <tr><td>Container</td><td>${esc(d.container_type)} (${esc(d.kernel_format)})</td></tr>
+      <tr><td>Size</td><td>${fmtMiB(d.decompressed_size)}</td></tr>
+      <tr><td>Exported KMI Symbols</td><td>${d.total_symbols}</td></tr>
+      <tr><td>Banner</td><td><code>${esc(d.linux_banner)}</code></td></tr>
+    </tbody></table></div></div>${extra}` + (ikEntries.length ? `<div class="card">
+      <h3>Embedded IKCONFIG (${ikEntries.length} options)</h3>
+      <input type="text" class="search-input" placeholder="Search CONFIG_..." oninput="filterTable('ikTbody', this.value)">
+      <div class="table-wrap"><table><thead><tr><th>Option</th><th>Value</th></tr></thead><tbody id="ikTbody">${ikRows}</tbody></table></div>
+    </div>` : '');
+  } catch (err) {
+    out.hidden = false;
+    out.innerHTML = `<div class="card"><span class="badge err">ERROR</span> <p style="margin-top:8px;">${esc(err.message)}</p></div>`;
+  } finally {
+    btn.disabled = false; setLoading(false);
+  }
+});
+
+document.getElementById('koForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('koBtn');
+  const out = document.getElementById('koResults');
+  btn.disabled = true; setLoading(true);
+  const fd = new FormData();
+  fd.append('kernel', document.getElementById('koKernelFile').files[0]);
+  if (document.getElementById('koRefFile').files[0]) fd.append('reference', document.getElementById('koRefFile').files[0]);
+  for (const f of document.getElementById('koModFiles').files) fd.append('modules', f);
+  try {
+    const r = await fetch('/api/verify-ko', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Module verification failed');
+    const badge = d.all_compatible ? '<span class="badge ok">ALL MODULES COMPATIBLE</span>' : `<span class="badge err">${d.failed_modules} MODULE(S) FAILED</span>`;
+    out.hidden = false;
+    out.innerHTML = `<div class="card">${badge} <span class="muted" style="margin-left:10px;">Kernel: ${esc(d.kernel_name)} (${d.total_symbols} symbols)</span></div>` + renderKoTable(d.results);
+  } catch (err) {
+    out.hidden = false;
+    out.innerHTML = `<div class="card"><span class="badge err">ERROR</span> <p style="margin-top:8px;">${esc(err.message)}</p></div>`;
+  } finally {
+    btn.disabled = false; setLoading(false);
+  }
+});
+
+async function triggerDownload(endpoint, fieldName, fileInputId, btnId, msgId, defaultName) {
+  const btn = document.getElementById(btnId);
+  const msg = document.getElementById(msgId);
+  btn.disabled = true; setLoading(true); msg.textContent = 'Processing...';
+  const fd = new FormData();
+  fd.append(fieldName, document.getElementById(fileInputId).files[0]);
+  try {
+    const r = await fetch(endpoint, { method: 'POST', body: fd });
+    if (!r.ok) { const j = await r.json(); throw new Error(j.error || 'Export failed'); }
+    const blob = await r.blob();
+    const cd = r.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename="([^"]+)"/);
+    const fname = m ? m[1] : defaultName;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = fname; a.click();
+    URL.revokeObjectURL(url);
+    const metaHdr = r.headers.get('X-Stub-Meta');
+    msg.textContent = `Downloaded ${fname} (${blob.size} bytes)` + (metaHdr ? ' - ' + JSON.parse(metaHdr).stub_profile : '');
+  } catch (err) {
+    msg.textContent = 'Error: ' + err.message;
+  } finally {
+    btn.disabled = false; setLoading(false);
+  }
+}
+
+document.getElementById('baseForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  triggerDownload('/api/export-baseline', 'artifact', 'baseFile', 'baseBtn', 'baseMsg', 'baseline.kmi.json.gz');
+});
+document.getElementById('stubForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  triggerDownload('/api/export-stub', 'boot_img', 'stubFile', 'stubBtn', 'stubMsg', 'boot_stub.tzst');
+});
+</script>
+</body>
+</html>
