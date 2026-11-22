@@ -1,0 +1,88 @@
+name: 'GKI Verifier KMI/vABI Audit'
+description: 'Audit Android GKI 2.0 kernel artifacts against a reference boot image or compact .kmi.json.gz baseline.'
+
+inputs:
+  reference:
+    description: 'Path to reference stock boot.img, AK3.zip, Image, vmlinux, Module.symvers, or .kmi.json.gz'
+    required: true
+  candidate:
+    description: 'Path to candidate boot.img, AK3.zip, Image, vmlinux, or Module.symvers'
+    required: true
+  modules:
+    description: 'Optional path to a .ko file, a directory of .ko files, or vendor_boot.img'
+    required: false
+    default: ''
+  symbol_list:
+    description: 'Optional Android KMI symbol list (abi_gki_aarch64). Only tags broken symbols that are in the list; the verdict stays strict.'
+    required: false
+    default: ''
+  fail_on_mismatch:
+    description: 'Fail workflow step when KMI or AVB mismatch is detected'
+    required: false
+    default: 'true'
+  write_summary:
+    description: 'Append Markdown audit report to GITHUB_STEP_SUMMARY'
+    required: false
+    default: 'true'
+
+outputs:
+  verdict:
+    description: 'Audit verdict (SAFE_TO_FLASH or VABI_OR_BOOT_MISMATCH)'
+    value: ${{ steps.audit.outputs.verdict }}
+  crc_mismatches:
+    description: 'Number of broken KMI symbol CRCs'
+    value: ${{ steps.audit.outputs.crc_mismatches }}
+  missing_symbols:
+    description: 'Number of removed exported symbols'
+    value: ${{ steps.audit.outputs.missing_symbols }}
+  added_symbols:
+    description: 'Number of newly exported symbols'
+    value: ${{ steps.audit.outputs.added_symbols }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run GKI Verifier Audit
+      id: audit
+      shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+        INPUT_REFERENCE: ${{ inputs.reference }}
+        INPUT_CANDIDATE: ${{ inputs.candidate }}
+        INPUT_MODULES: ${{ inputs.modules }}
+        INPUT_SYMBOL_LIST: ${{ inputs.symbol_list }}
+        INPUT_FAIL: ${{ inputs.fail_on_mismatch }}
+        INPUT_SUMMARY: ${{ inputs.write_summary }}
+      run: |
+        set -uo pipefail
+        OUT_DIR="${RUNNER_TEMP:-/tmp}"
+        ARGS=(diff "$INPUT_REFERENCE" "$INPUT_CANDIDATE" --json "$OUT_DIR/gki_audit.json" --markdown "$OUT_DIR/gki_audit.md")
+        if [ -n "$INPUT_MODULES" ]; then
+          ARGS+=(--modules "$INPUT_MODULES")
+        fi
+        if [ -n "$INPUT_SYMBOL_LIST" ]; then
+          ARGS+=(--symbol-list "$INPUT_SYMBOL_LIST")
+        fi
+
+        python3 -m gki_verifier "${ARGS[@]}"
+        RC=$?
+
+        if [ "$INPUT_SUMMARY" = "true" ] && [ -f "$OUT_DIR/gki_audit.md" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+          cat "$OUT_DIR/gki_audit.md" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        if [ -f "$OUT_DIR/gki_audit.json" ] && [ -n "${GITHUB_OUTPUT:-}" ]; then
+          GKI_JSON="$OUT_DIR/gki_audit.json" python3 -c '
+        import json, os
+        with open(os.environ["GKI_JSON"], "r", encoding="utf-8") as f:
+            d = json.load(f)
+        print("verdict=" + d["verdict"])
+        print("crc_mismatches=" + str(d["summary"]["crc_mismatches"]))
+        print("missing_symbols=" + str(d["summary"]["missing_symbols"]))
+        print("added_symbols=" + str(d["summary"]["added_symbols"]))
+        ' >> "$GITHUB_OUTPUT"
+        fi
+
+        if [ "$INPUT_FAIL" = "true" ] && [ "$RC" -ne 0 ]; then
+          exit "$RC"
+        fi
