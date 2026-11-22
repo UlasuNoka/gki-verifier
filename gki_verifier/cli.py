@@ -72,12 +72,12 @@ def main() -> None:
         cand_art = load_kernel_artifact(args.candidate)
         raw_mods = []
         for mp in args.modules:
-            if os.path.isfile(mp):
-                with open(mp, "rb") as f:
-                    raw_mods.append({"name": os.path.basename(mp), "bytes": f.read()})
-            elif os.path.isdir(mp):
+            if os.path.isdir(mp):
                 kos, _ = collect_modules_from_path(mp)
                 raw_mods.extend(kos)
+            elif os.path.exists(mp):
+                with open(mp, "rb") as f:
+                    raw_mods.append({"name": os.path.basename(mp), "bytes": f.read()})
             else:
                 print(f"[ERROR] Module path not found: {mp}", file=sys.stderr)
                 sys.exit(2)

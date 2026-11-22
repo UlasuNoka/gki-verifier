@@ -133,16 +133,16 @@ def collect_modules_from_inputs(raw_items: List[Dict]) -> Tuple[List[Dict], List
 
 def collect_modules_from_path(path: str) -> Tuple[List[Dict], List[Dict]]:
     raw_items: List[Dict] = []
-    if os.path.isfile(path):
-        with open(path, "rb") as f:
-            raw_items.append({"name": os.path.basename(path), "bytes": f.read()})
-    elif os.path.isdir(path):
+    if os.path.isdir(path):
         for root, _, files in os.walk(path):
             for fn in sorted(files):
                 if fn.lower().endswith((".ko", ".ko.gz", ".ko.zst", ".ko.xz", ".ko.lz4")):
                     full = os.path.join(root, fn)
                     with open(full, "rb") as f:
                         raw_items.append({"name": fn, "bytes": f.read()})
+    elif os.path.exists(path):
+        with open(path, "rb") as f:
+            raw_items.append({"name": os.path.basename(path), "bytes": f.read()})
     return collect_modules_from_inputs(raw_items)
 
 
