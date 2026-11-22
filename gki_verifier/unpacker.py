@@ -3,6 +3,7 @@
 import lzma
 import re
 import shutil
+import struct
 import subprocess
 import zlib
 from typing import Dict, List, Tuple
@@ -15,6 +16,130 @@ MAGIC_ZSTD = b"\x28\xb5\x2f\xfd"
 MAGIC_LZ4_FRAME = b"\x04\x22\x4d\x18"
 MAGIC_LZ4_LEGACY = b"\x02\x21\x4c\x18"
 MAGIC_ARM64 = b"ARM\x64"
+
+
+def _decompress_lz4_block(src: memoryview, out=None) -> bytearray:
+    if out is None:
+        out = bytearray()
+    pos = 0
+    end = len(src)
+
+    while pos < end:
+        token = src[pos]
+        pos += 1
+        lit_len = token >> 4
+        if lit_len == 15:
+            while pos < end:
+                b = src[pos]
+                pos += 1
+                lit_len += b
+                if b != 255:
+                    break
+        if pos + lit_len > end:
+            raise ValueError("Corrupt LZ4 block: literal length exceeds block size")
+        if lit_len:
+            out.extend(src[pos : pos + lit_len])
+            pos += lit_len
+        if pos >= end:
+            break
+        if pos + 2 > end:
+            raise ValueError("Corrupt LZ4 block: truncated match offset")
+        offset = src[pos] | (src[pos + 1] << 8)
+        pos += 2
+        if offset == 0 or offset > len(out):
+            raise ValueError(f"Corrupt LZ4 block: invalid match offset {offset}")
+
+        match_len = (token & 0x0F) + 4
+        if (token & 0x0F) == 15:
+            while pos < end:
+                b = src[pos]
+                pos += 1
+                match_len += b
+                if b != 255:
+                    break
+
+        start = len(out) - offset
+        while match_len > 0:
+            chunk = min(match_len, len(out) - start)
+            out.extend(out[start : start + chunk])
+            match_len -= chunk
+
+    return out
+
+
+def _decompress_lz4_legacy_py(payload: bytes) -> bytes:
+    mv = memoryview(payload)
+    pos = 0
+    total = len(mv)
+    out = bytearray()
+
+    while pos + 4 <= total:
+        if mv[pos : pos + 4].tobytes() == MAGIC_LZ4_LEGACY:
+            pos += 4
+            continue
+        blk_sz = struct.unpack_from("<I", mv, pos)[0]
+        pos += 4
+        if blk_sz == 0:
+            continue
+        if blk_sz > 16 * 1024 * 1024 or pos + blk_sz > total:
+            raise ValueError(f"Corrupt LZ4 legacy block size: {blk_sz}")
+        out.extend(_decompress_lz4_block(mv[pos : pos + blk_sz]))
+        pos += blk_sz
+
+    return bytes(out)
+
+
+def _decompress_lz4_frame_py(payload: bytes) -> bytes:
+    mv = memoryview(payload)
+    pos = 0
+    total = len(mv)
+    out = bytearray()
+
+    while pos + 7 <= total:
+        if mv[pos : pos + 4].tobytes() != MAGIC_LZ4_FRAME:
+            break
+        pos += 4
+        flg = mv[pos]
+        pos += 2
+        if (flg >> 6) != 1:
+            raise ValueError(f"Unsupported LZ4 frame version: {flg >> 6}")
+        b_indep = bool((flg >> 5) & 1)
+        b_cksum = bool((flg >> 4) & 1)
+        has_c_sz = bool((flg >> 3) & 1)
+        has_c_cksum = bool((flg >> 2) & 1)
+        has_dict = bool(flg & 1)
+
+        if has_c_sz:
+            pos += 8
+        if has_dict:
+            pos += 4
+        pos += 1
+
+        frame_out = bytearray()
+        while pos + 4 <= total:
+            raw_sz = struct.unpack_from("<I", mv, pos)[0]
+            pos += 4
+            if raw_sz == 0:
+                if has_c_cksum:
+                    pos += 4
+                break
+            is_uncompressed = bool(raw_sz & 0x80000000)
+            blk_sz = raw_sz & 0x7FFFFFFF
+            if pos + blk_sz > total:
+                raise ValueError(f"Corrupt LZ4 frame block size: {blk_sz}")
+            blk = mv[pos : pos + blk_sz]
+            pos += blk_sz
+            if b_cksum:
+                pos += 4
+            if is_uncompressed:
+                frame_out.extend(blk)
+            elif b_indep:
+                frame_out.extend(_decompress_lz4_block(blk))
+            else:
+                _decompress_lz4_block(blk, frame_out)
+        out.extend(frame_out)
+
+    return bytes(out)
 
 
 def _run_decompressor(tool_name: str, args: List[str], payload: bytes) -> bytes:
@@ -50,10 +175,14 @@ def decompress_bytes(payload: bytes) -> Tuple[str, bytes]:
         return "zstd", _run_decompressor("zstd", ["-d", "-q", "-c"], payload)
 
     if payload[:4] == MAGIC_LZ4_FRAME:
-        return "lz4", _run_decompressor("lz4", ["-d", "-q", "-c"], payload)
+        if shutil.which("lz4"):
+            return "lz4", _run_decompressor("lz4", ["-d", "-q", "-c"], payload)
+        return "lz4", _decompress_lz4_frame_py(payload)
 
     if payload[:4] == MAGIC_LZ4_LEGACY:
-        return "lz4_legacy", _run_decompressor("lz4", ["-d", "-q", "-c"], payload)
+        if shutil.which("lz4"):
+            return "lz4_legacy", _run_decompressor("lz4", ["-d", "-q", "-c"], payload)
+        return "lz4_legacy", _decompress_lz4_legacy_py(payload)
 
     if len(payload) > 64 and payload[56:60] == MAGIC_ARM64:
         return "raw", payload
@@ -139,10 +268,7 @@ def _decompress_ramdisk_stream(blob: bytes) -> bytes:
         return b""
     if blob[:6] in (b"070701", b"070702"):
         return blob
-    try:
-        _, raw = decompress_bytes(blob)
-        return raw
-    except Exception:
+    if blob[:3] == MAGIC_GZIP:
         out = bytearray()
         pos = 0
         while pos < len(blob):
@@ -156,9 +282,13 @@ def _decompress_ramdisk_stream(blob: bytes) -> bytes:
                 if consumed <= 0:
                     break
                 pos += consumed
+            elif blob[pos] == 0:
+                pos += 1
             else:
                 break
-        return bytes(out) if out else blob
+        return bytes(out)
+    _, raw = decompress_bytes(blob)
+    return raw
 
 
 def extract_ko_from_vendor_boot(raw_bytes: bytes) -> Tuple[Dict, List[Dict]]:

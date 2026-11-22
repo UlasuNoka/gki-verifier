@@ -17,7 +17,8 @@ from gki_verifier.analyzer import compare_kernels, parse_symbol_list
 from gki_verifier.bootimg import build_boot_stub_bytes, parse_boot_img
 from gki_verifier.kmi import export_baseline_bytes, load_kernel_artifact
 from gki_verifier.ko_verifier import verify_modules_against_kernel
-from gki_verifier.unpacker import extract_cpio_newc, extract_ko_from_vendor_boot
+from unittest import mock
+from gki_verifier.unpacker import decompress_bytes, extract_cpio_newc, extract_ko_from_vendor_boot
 from gki_verifier.web import VerifierHTTPHandler
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -212,6 +213,24 @@ class TestGKIVerifier(unittest.TestCase):
         self.assertEqual(rep_tag["summary"]["kmi_listed_breakages"], 1)
         tags = {x["symbol"]: x["in_kmi_list"] for x in rep_tag["crc_diffs"] + rep_tag["missing_list"]}
         self.assertEqual(tags, {"zstd_compress_cctx": True, "zstd_free_cctx": False})
+
+    def test_pure_python_lz4_fallback(self):
+        lz4_blk = bytes([0x22]) + b"AB" + bytes([0x02, 0x00])
+        legacy_stream = b"\x02\x21\x4c\x18" + struct.pack("<I", len(lz4_blk)) + lz4_blk
+        legacy_double = legacy_stream + legacy_stream
+        frame_stream = (
+            b"\x04\x22\x4d\x18\x60\x40\x00"
+            + struct.pack("<I", len(lz4_blk))
+            + lz4_blk
+            + struct.pack("<I", 0)
+        )
+        with mock.patch("gki_verifier.unpacker.shutil.which", return_value=None):
+            fmt1, out1 = decompress_bytes(legacy_double)
+            self.assertEqual(fmt1, "lz4_legacy")
+            self.assertEqual(out1, b"ABABABABABABABAB")
+            fmt2, out2 = decompress_bytes(frame_stream)
+            self.assertEqual(fmt2, "lz4")
+            self.assertEqual(out2, b"ABABABAB")
 
     def test_ko_sibling_resolution_and_vendor_boot(self):
         kern_syms = {"init_task": {"crc": 0x22222222, "type": "EXPORT_SYMBOL", "namespace": "", "zone": "sched"}}
